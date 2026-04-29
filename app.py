@@ -1,39 +1,43 @@
-from flask import Flask, Response, request
-import subprocess
-import os
+from flask import Flask, Response, redirect
 import requests
+import re
 
 app = Flask(__name__)
 
-def get_m3u8_link(video_id):
-    url = f"https://www.dailymotion.com/video/{video_id}"
+def get_dm_m3u8(video_id):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
-        result = subprocess.run(
-            ["streamlink", url, "best", "--stream-url"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        m3u8_url = result.stdout.strip()
-        if m3u8_url and "m3u8" in m3u8_url:
-            return m3u8_url
+        # الدخول لصفحة الفيديو لجلب بيانات البث
+        url = f"https://www.dailymotion.com/player/metadata/video/{video_id}"
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.json()
+        
+        # استخراج رابط m3u8 من البيانات
+        m3u8_url = data.get('qualities', {}).get('auto', [{}])[0].get('url')
+        return m3u8_url
     except Exception as e:
-        print(f"Error fetching link for {video_id}: {e}")
-    return None
+        print(f"Error: {e}")
+        return None
 
 @app.route('/play/<video_id>')
-def play_video(video_id):
-    # إزالة .m3u8 إذا كانت موجودة في نهاية المعرف
-    video_id = video_id.replace('.m3u8', '')
+def play(video_id):
+    # تنظيف المعرف من .m3u8 إذا وجدت
+    v_id = video_id.replace('.m3u8', '')
+    real_link = get_dm_m3u8(v_id)
     
-    # جلب الرابط الحقيقي من ديلي موشن
-    real_m3u8_url = get_m3u8_link(video_id)
-    
-    if not real_m3u8_url:
-        return "Error: Could not find stream", 404
+    if real_link:
+        # إعادة التوجيه للرابط الحقيقي
+        return redirect(real_link)
+    return "Video Not Found", 404
 
-    # بدلاً من إعادة التوجيه (Redirect)، سنقوم بجلب محتوى الملف وإرساله
-    # هذا يضمن أن المشغل (مثل XPlayer) يرى محتوى m3u8 حقيقي فوراً
+@app.route('/')
+def home():
+    return "Server is Live"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
     try:
         resp = requests.get(real_m3u8_url, timeout=10)
         # نقوم بإرسال المحتوى مع الترويسة الصحيحة (Content-Type)
